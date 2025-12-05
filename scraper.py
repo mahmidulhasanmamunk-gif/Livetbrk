@@ -2,43 +2,53 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
-TARGET_URL = "https://www.jagobd.com/"
-OUTPUT_FILE = "playlist.m3u"
-
-headers = {
+BASE_URL = "https://www.jagobd.com/"
+HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
-def extract_m3u8_from_iframe(url):
-    try:
-        r = requests.get(url, headers=headers, timeout=10)
-        if r.status_code != 200:
-            return None
+OUTPUT_FILE = "playlist.m3u"
 
-        text = r.text
-        # Find direct m3u8
-        m = re.search(r'(https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*)', text)
-        if m:
-            return m.group(1)
-
-    except:
-        return None
+def extract_m3u8_from_js(text):
+    # regex to catch any m3u8 inside JS
+    m = re.search(r'(https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*)', text)
+    if m:
+        return m.group(1)
     return None
 
-def scrape_channels():
-    r = requests.get(TARGET_URL, headers=headers, timeout=10)
+def find_iframe_sources():
+    r = requests.get(BASE_URL, headers=HEADERS, timeout=10)
     soup = BeautifulSoup(r.text, "html.parser")
 
-    channels = []
-    for iframe in soup.find_all("iframe"):
-        if "src" in iframe.attrs:
-            src = iframe["src"]
-            full = requests.compat.urljoin(TARGET_URL, src)
-            m3u8 = extract_m3u8_from_iframe(full)
-            if m3u8:
-                channels.append(m3u8)
+    iframes = []
+    for tag in soup.find_all("iframe"):
+        if "src" in tag.attrs:
+            src = tag["src"]
+            full = requests.compat.urljoin(BASE_URL, src)
+            iframes.append(full)
 
-    return list(set(channels))
+    return list(set(iframes))
+
+def scrape_all():
+    m3u_list = []
+
+    iframe_links = find_iframe_sources()
+    print("Iframe count:", len(iframe_links))
+
+    for link in iframe_links:
+        try:
+            r = requests.get(link, headers=HEADERS, timeout=10)
+            if r.status_code != 200:
+                continue
+
+            m3u8 = extract_m3u8_from_js(r.text)
+            if m3u8:
+                m3u_list.append(m3u8)
+
+        except:
+            continue
+
+    return list(set(m3u_list))
 
 def build_m3u(urls):
     lines = ["#EXTM3U"]
@@ -48,8 +58,8 @@ def build_m3u(urls):
     return "\n".join(lines) + "\n"
 
 def main():
-    urls = scrape_channels()
-    print("Found:", len(urls))
+    urls = scrape_all()
+    print("Found streams:", len(urls))
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(build_m3u(urls))
