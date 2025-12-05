@@ -9,65 +9,50 @@ headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
-def extract_m3u8(text):
-    pattern = r'(https?:\/\/[^\s"\'<>]+\.m3u8[^\s"\'<>]*)'
-    return list(set(re.findall(pattern, text)))
-
-def scrape_page(url):
+def extract_m3u8_from_iframe(url):
     try:
         r = requests.get(url, headers=headers, timeout=10)
         if r.status_code != 200:
-            return []
+            return None
+
         text = r.text
-        soup = BeautifulSoup(text, "html.parser")
+        # Find direct m3u8
+        m = re.search(r'(https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*)', text)
+        if m:
+            return m.group(1)
 
-        # Extract .m3u8 from raw html
-        urls = extract_m3u8(text)
+    except:
+        return None
+    return None
 
-        # Find related internal channel pages
-        links = soup.find_all("a", href=True)
-        subpages = []
-        for link in links:
-            href = link["href"]
-            if "/tvs/" in href or "/live/" in href or "/channel" in href:
-                full = requests.compat.urljoin(url, href)
-                subpages.append(full)
+def scrape_channels():
+    r = requests.get(TARGET_URL, headers=headers, timeout=10)
+    soup = BeautifulSoup(r.text, "html.parser")
 
-        # Crawl sub-pages for more m3u8s
-        for sp in list(set(subpages))[:30]:
-            try:
-                sub = requests.get(sp, headers=headers, timeout=10).text
-                urls += extract_m3u8(sub)
-            except:
-                pass
+    channels = []
+    for iframe in soup.find_all("iframe"):
+        if "src" in iframe.attrs:
+            src = iframe["src"]
+            full = requests.compat.urljoin(TARGET_URL, src)
+            m3u8 = extract_m3u8_from_iframe(full)
+            if m3u8:
+                channels.append(m3u8)
 
-        return list(set(urls))
+    return list(set(channels))
 
-    except Exception:
-        return []
-
-def build_m3u(entries):
+def build_m3u(urls):
     lines = ["#EXTM3U"]
-    for i, url in enumerate(entries, start=1):
-        name = f"Channel_{i}"
-        lines.append(f'#EXTINF:-1 group-title="Live",{name}')
+    for i, url in enumerate(urls, start=1):
+        lines.append(f'#EXTINF:-1 group-title="Jagobd",Channel_{i}')
         lines.append(url)
     return "\n".join(lines) + "\n"
 
 def main():
-    urls = scrape_page(TARGET_URL)
-    if not urls:
-        print("No streams found.")
-        return
+    urls = scrape_channels()
+    print("Found:", len(urls))
 
-    content = build_m3u(urls)
-
-    # Write playlist
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        f.write(content)
-
-    print("Playlist updated:", OUTPUT_FILE)
-    print("Total channels:", len(urls))
+        f.write(build_m3u(urls))
 
 if __name__ == "__main__":
     main()
